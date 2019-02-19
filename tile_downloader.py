@@ -25,7 +25,7 @@ def download_tiles(
 ) -> None:
     # language=rst
     """
-    download tiles from `bbox` with `zoom` zoomlevel to `tiles_dir` from `map_` using `proxies`
+    Download tiles from `bbox` with `zoom` zoomlevel to `tiles_dir` from `map_` using `proxies`.
     :param tiles_dir:
     :param bbox: area of the geo coordinates in the form of:
      `(min_lat, min_lon, max_lat, max_lon)`

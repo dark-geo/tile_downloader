@@ -96,7 +96,6 @@ class GoogleSatellite(Map):
 
     tiles_format = ImageFormat.PNG
 
-
 # TODO: WRONG YA
 # Yandex uses another cs standard (https://stackoverflow.com/questions/26742738/yandex-tiles-wrong)
 # So yandex tiles usage differs from others
