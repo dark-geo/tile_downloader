@@ -96,6 +96,20 @@ class GoogleSatellite(Map):
 
     tiles_format = ImageFormat.PNG
 
+
+class ThunderforestLandscape(Map):
+    """
+    Thunderforest Landscape Map
+    If maps won't download get new apikey from:
+    https://www.thunderforest.com/maps/landscape/
+    """
+    @staticmethod
+    def get_urls_gen(tile):
+        for i in ['a', 'b', 'c']:
+            yield f'https://{i}.tile.thunderforest.com/landscape/{tile.zoom}/{tile.google[0]}/{tile.google[1]}.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
+
+    tiles_format = ImageFormat.PNG
+
 # TODO: WRONG YA
 # Yandex uses another cs standard (https://stackoverflow.com/questions/26742738/yandex-tiles-wrong)
 # So yandex tiles usage differs from others
