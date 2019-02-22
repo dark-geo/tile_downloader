@@ -4,6 +4,7 @@ from pathlib import Path
 from random import randint
 from typing import Union, Tuple, Generator, Optional
 
+from pygeotile.point import Point
 from pygeotile.tile import Tile
 
 
@@ -69,6 +70,23 @@ def get_bbox_in_tms(bbox: Tuple[float, float, float, float], zoom: int) -> Tuple
     min_y, max_y = sorted([tile1.tms_y, tile2.tms_y])
 
     return min_x, min_y, max_x, max_y
+
+
+def get_bbox_in_meters(bbox: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+    # language=rst
+    """
+    Returns bbox of geo coordinates translated in meters
+    :param bbox: area of the geo coordinates in the form of:
+     `(min_lat, min_lon, max_lat, max_lon)`
+    :return: area of the geo coordinates in the form of:
+     `min_x, min_y, max_x, max_y`
+    """
+    diagonal_points = [
+        Point.from_latitude_longitude(*bbox[0:2]),
+        Point.from_latitude_longitude(*bbox[2:4])
+    ]
+    x_meters, y_meters = zip(*[point.meters for point in diagonal_points])
+    return min(x_meters), min(y_meters), max(x_meters), max(y_meters)
 
 
 def get_tiles_bbox(tms_bbox: Tuple[int, int, int, int], zoom: int) -> Tuple[float, float, float, float]:

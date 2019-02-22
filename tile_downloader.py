@@ -5,14 +5,16 @@ from pathlib import Path
 from typing import Union, Tuple, Type, Optional
 
 import cv2
+import numpy as np
 import rasterio as rio
 import rasterio.mask
+import rasterio.warp
 import requests
 from pygeotile.tile import Tile
 from shapely.geometry import Polygon
 
 import maps
-from utils import ImageFormat, get_tile_gen, get_filename, get_bbox_in_tms, get_tiles_bbox
+from utils import ImageFormat, get_tile_gen, get_filename, get_bbox_in_tms, get_tiles_bbox, get_bbox_in_meters
 
 
 def download_tiles(
@@ -52,18 +54,16 @@ def download_tiles(
     session.close()
 
 
-def _merge_tiles(
-        path: Union[Path, str],
+def _get_tiles_data(
         tiles_dir: Union[Path, str],
         tms_bbox: Tuple[int, int, int, int],
         zoom: int,
-        tiles_format: ImageFormat
-) -> None:
+        tiles_format: ImageFormat  # unnecessary
+) -> np.ndarray:
     # language=rst
     """
     Merge tiles from `tms_bbox` area from `tiles_dir` with `zoom` zoomlevel and `tiles_format` image format
-    in image file with `path` without georeference
-    :param path:
+    in array
     :param tiles_dir:
     :param tms_bbox: area of the tms coordinates in the form of:
      `(min_x, min_y, max_x, max_y)`
@@ -96,9 +96,8 @@ def _merge_tiles(
 
         row_img = cv2.hconcat(row)
         rows.append(row_img)
-    data = cv2.vconcat(rows)
 
-    cv2.imwrite(path, data)
+    return cv2.vconcat(rows)
 
 
 def _merge_tiles_in_gtiff(
@@ -106,7 +105,8 @@ def _merge_tiles_in_gtiff(
         tiles_dir: Union[Path, str],
         tms_bbox: Tuple[int, int, int, int],
         zoom: int,
-        map_: Type[maps.Map]
+        map_: Type[maps.Map],
+        crs=None
 ) -> None:
     # language=rst
     """
@@ -118,26 +118,35 @@ def _merge_tiles_in_gtiff(
      `(min_x, min_y, max_x, max_y)`
     :param zoom:
     :param map_:
+    :param crs: coordinate reference system, that will be used for GeoTiff creation.
+    If this parameter is None, `map_.crs` will be used instead.
     :return:
     """
-    with tempfile.NamedTemporaryFile(suffix='.tiff') as tmfile:
-        _merge_tiles(tmfile.name, tiles_dir, tms_bbox, zoom, map_.tiles_format)
+    tiles_data = _get_tiles_data(tiles_dir, tms_bbox, zoom, map_.tiles_format)
+    left, bottom, right, top = get_bbox_in_meters(get_tiles_bbox(tms_bbox, zoom))
 
-        with rio.open(tmfile.name) as tiff_img:
-            meta = tiff_img.meta.copy()
-            data = tiff_img.read()
-
-    meta['driver'] = 'GTiff'
-    meta['crs'] = map_.crs
-
-    south, west, north, east = get_tiles_bbox(tms_bbox=tms_bbox, zoom=zoom)
-    meta['transform'] = rio.transform.from_bounds(
-        west, south, east, north, tiff_img.width, tiff_img.height
+    meta = dict(
+        driver='GTiff',
+        crs=map_.crs if crs is None else crs,
+        height=tiles_data.shape[0],
+        width=tiles_data.shape[1],
+        count=tiles_data.shape[2],
+        dtype=tiles_data.dtype
     )
 
-    with rio.open(path, 'w', **meta) as file:
+    meta['transform'], meta['width'], meta['height'] = rio.warp.calculate_default_transform(
+        map_.crs, meta['crs'], tiles_data.shape[1], tiles_data.shape[0], left, bottom, right, top
+    )
+
+    src_transform = rio.transform.from_bounds(left, bottom, right, top, tiles_data.shape[1], tiles_data.shape[0])
+    with rio.open(path, 'w', **meta) as dest_img:
         for i in range(meta['count']):
-            file.write(data[i], i + 1)
+            rio.warp.reproject(
+                tiles_data.take(i, 2),
+                rio.band(dest_img, i + 1),
+                src_transform=src_transform,
+                src_crs=map_.crs
+            )
 
 
 def download_in_gtiff(
@@ -145,6 +154,7 @@ def download_in_gtiff(
         bbox: Tuple[float, float, float, float],
         zoom: int,
         map_: Type[maps.Map],
+        crs: str = 'EPSG:4326',
         tiles_dir: Union[str, Path, None] = None,
         proxies: Optional[dict] = None
 ) -> None:
@@ -157,19 +167,19 @@ def download_in_gtiff(
      `(min_lat, min_lon, max_lat, max_lon)`
     :param zoom:
     :param map_:
+    :param crs:
     :param tiles_dir:
     :param proxies:
     :return:
     """
     min_lat, min_lon, max_lat, max_lon = bbox
-
-    with tempfile.NamedTemporaryFile() as tmfile:
+    with tempfile.NamedTemporaryFile(suffix='.tiff') as tmfile:
         with tempfile.TemporaryDirectory() as temp_dir:
             tiles_dir = temp_dir if tiles_dir is None else tiles_dir
 
             download_tiles(tiles_dir, bbox, zoom, map_, proxies)
             tms_bbox = get_bbox_in_tms(bbox, zoom)
-            _merge_tiles_in_gtiff(tmfile.name, tiles_dir, tms_bbox, zoom, map_)
+            _merge_tiles_in_gtiff(tmfile.name, tiles_dir, tms_bbox, zoom, map_, crs)
 
         img = rio.open(tmfile.name)
         meta = img.meta.copy()
@@ -180,7 +190,7 @@ def download_in_gtiff(
             crop=True
         )
 
-        meta['height'], meta['width'] = cropped_data.shape[-2:]
+    meta['height'], meta['width'] = cropped_data.shape[-2:]
     with rio.open(path, 'w', **meta) as file:
         for i in range(meta['count']):
             file.write(cropped_data[i], i + 1)

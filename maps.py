@@ -70,7 +70,7 @@ class BingSatellite(Map):
         for i in range(4):
             yield f'http://a{i}.ortho.tiles.virtualearth.net/tiles/a{tile.quad_tree}.jpeg?g=94'
 
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class OpenStreetMap(Map):
