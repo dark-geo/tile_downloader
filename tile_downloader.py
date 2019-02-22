@@ -9,6 +9,7 @@ import rasterio as rio
 import rasterio.mask
 import requests
 from pygeotile.tile import Tile
+from pygeotile.point import Point
 from shapely.geometry import Polygon
 
 import maps
@@ -123,21 +124,15 @@ def _merge_tiles_in_gtiff(
     with tempfile.NamedTemporaryFile(suffix='.tiff') as tmfile:
         _merge_tiles(tmfile.name, tiles_dir, tms_bbox, zoom, map_.tiles_format)
 
-        with rio.open(tmfile.name) as tiff_img:
-            meta = tiff_img.meta.copy()
-            data = tiff_img.read()
+        bbox = get_tiles_bbox(tms_bbox, zoom)
+        ul_point = Point.from_latitude_longitude(bbox[2], bbox[1])
+        lr_point = Point.from_latitude_longitude(bbox[0], bbox[3])
 
-    meta['driver'] = 'GTiff'
-    meta['crs'] = map_.crs
-
-    south, west, north, east = get_tiles_bbox(tms_bbox=tms_bbox, zoom=zoom)
-    meta['transform'] = rio.transform.from_bounds(
-        west, south, east, north, tiff_img.width, tiff_img.height
-    )
-
-    with rio.open(path, 'w', **meta) as file:
-        for i in range(meta['count']):
-            file.write(data[i], i + 1)
+        os.system(' '.join([
+            'gdal_translate -of GTiff -co BIGTIFF=YES -co NUM_THREADS=8',
+            '-a_ullr {} {} {} {}'.format(*ul_point.meters, *lr_point.meters),
+            f'-a_srs {map_.crs} {tmfile.name} {path}'
+        ]))
 
 
 def download_in_gtiff(
@@ -145,6 +140,7 @@ def download_in_gtiff(
         bbox: Tuple[float, float, float, float],
         zoom: int,
         map_: Type[maps.Map],
+        crs: str = 'EPSG:4326',
         tiles_dir: Union[str, Path, None] = None,
         proxies: Optional[dict] = None
 ) -> None:
@@ -157,25 +153,41 @@ def download_in_gtiff(
      `(min_lat, min_lon, max_lat, max_lon)`
     :param zoom:
     :param map_:
+    :param crs:
     :param tiles_dir:
     :param proxies:
     :return:
     """
+    ul_point = Point.from_latitude_longitude(bbox[2], bbox[1])
+    lr_point = Point.from_latitude_longitude(bbox[3], bbox[0])
+    min_x_meters, max_x_meters = sorted([ul_point.meters[0], lr_point.meters[0]])
+    min_y_meters, max_y_meters = sorted([ul_point.meters[1], lr_point.meters[1]])
+
     min_lat, min_lon, max_lat, max_lon = bbox
 
-    with tempfile.NamedTemporaryFile() as tmfile:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            tiles_dir = temp_dir if tiles_dir is None else tiles_dir
 
-            download_tiles(tiles_dir, bbox, zoom, map_, proxies)
-            tms_bbox = get_bbox_in_tms(bbox, zoom)
-            _merge_tiles_in_gtiff(tmfile.name, tiles_dir, tms_bbox, zoom, map_)
+    with tempfile.NamedTemporaryFile() as tmfile1:
+        with tempfile.NamedTemporaryFile() as tmfile2:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                tiles_dir = temp_dir if tiles_dir is None else tiles_dir
 
-        img = rio.open(tmfile.name)
+                download_tiles(tiles_dir, bbox, zoom, map_, proxies)
+                tms_bbox = get_bbox_in_tms(bbox, zoom)
+                _merge_tiles_in_gtiff(tmfile2.name, tiles_dir, tms_bbox, zoom, map_)
+
+            os.system(' '.join([
+                'gdalwarp -dstalpha -srcnodata 0 -dstnodata 0 -overwrite -wo NUM_THREADS=8',
+                f'-co COMPRESS=PACKBITS -co BIGTIFF=YES -s_srs {map_.crs} -t_srs {crs}',
+                f'{tmfile2.name} {tmfile1.name}'
+            ]))
+
+        img = rio.open(tmfile1.name)
         meta = img.meta.copy()
+
 
         cropped_data, meta['transform'] = rio.mask.mask(
             img,
+            # [Polygon.from_bounds(min_x_meters, min_y_meters, max_x_meters, max_y_meters), ],
             [Polygon.from_bounds(min_lon, min_lat, max_lon, max_lat), ],
             crop=True
         )
