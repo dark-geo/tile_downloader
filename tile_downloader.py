@@ -101,7 +101,7 @@ def _merge_tiles(
     cv2.imwrite(path, data)
 
 
-def _megre_tiles_in_gtiff(
+def _merge_tiles_in_gtiff(
         path: Union[Path, str],
         tiles_dir: Union[Path, str],
         tms_bbox: Tuple[int, int, int, int],
@@ -145,6 +145,7 @@ def download_in_gtiff(
         bbox: Tuple[float, float, float, float],
         zoom: int,
         map_: Type[maps.Map],
+        tiles_dir: Union[str, Path, None] = None,
         proxies: Optional[dict] = None
 ) -> None:
     # language=rst
@@ -156,16 +157,19 @@ def download_in_gtiff(
      `(min_lat, min_lon, max_lat, max_lon)`
     :param zoom:
     :param map_:
+    :param tiles_dir:
     :param proxies:
     :return:
     """
     min_lat, min_lon, max_lat, max_lon = bbox
 
     with tempfile.NamedTemporaryFile() as tmfile:
-        with tempfile.TemporaryDirectory() as t_dir:
-            download_tiles(t_dir, bbox, zoom, map_, proxies)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tiles_dir = temp_dir if tiles_dir is None else tiles_dir
+
+            download_tiles(tiles_dir, bbox, zoom, map_, proxies)
             tms_bbox = get_bbox_in_tms(bbox, zoom)
-            _megre_tiles_in_gtiff(tmfile.name, t_dir, tms_bbox, zoom, map_)
+            _merge_tiles_in_gtiff(tmfile.name, tiles_dir, tms_bbox, zoom, map_)
 
         img = rio.open(tmfile.name)
         meta = img.meta.copy()

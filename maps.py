@@ -61,7 +61,7 @@ class BingRoad(Map):
                     f'r{tile.quad_tree}.jpeg?mkt=ru-ru&it=G,VE,BX,L,LA&shading=hill&g=94'
             )
 
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class BingSatellite(Map):
@@ -78,7 +78,7 @@ class OpenStreetMap(Map):
     def get_urls_gen(tile):
         yield f'https://c.tile.openstreetmap.org/{tile.zoom}/{tile.google[0]}/{tile.google[1]}.png'
 
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class GoogleHybrid(Map):
@@ -88,7 +88,7 @@ class GoogleHybrid(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=y&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class GoogleRoad(Map):
@@ -98,7 +98,7 @@ class GoogleRoad(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=m&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class GoogleSatellite(Map):
@@ -108,7 +108,7 @@ class GoogleSatellite(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=s&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    crs = 'EPSG:3857'
 
 
 class ThunderforestLandscape(Map):
