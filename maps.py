@@ -113,16 +113,52 @@ class GoogleSatellite(Map):
 
 class ThunderforestLandscape(Map):
     """
-    Thunderforest Landscape Map
+    Thunderforest Landscape Map.
     If maps won't download get new apikey from:
     https://www.thunderforest.com/maps/landscape/
     """
+
     @staticmethod
     def get_urls_gen(tile):
         for i in ['a', 'b', 'c']:
-            yield f'https://{i}.tile.thunderforest.com/landscape/{tile.zoom}/{tile.google[0]}/{tile.google[1]}.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
+            yield f'https://{i}.tile.thunderforest.com/landscape/{tile.zoom}/{tile.google[0]}/{tile.google[1]}' \
+                f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
 
     tiles_format = ImageFormat.PNG
+    crs = 'EPSG:4326'
+
+
+class ThunderforestMobileAtlas(Map):
+    """
+    Thunderforest Mobile Atlas Map.
+    If maps won't download get new apikey from:
+    https://www.thunderforest.com/maps/mobile-atlas/
+    """
+
+    @staticmethod
+    def get_urls_gen(tile):
+        for i in ['a', 'b', 'c']:
+            yield f'https://{i}.tile.thunderforest.com/mobile-atlas/{tile.zoom}/{tile.google[0]}/{tile.google[1]}' \
+                f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
+
+    tiles_format = ImageFormat.PNG
+    crs = 'EPSG:4326'
+
+
+class ArcGISWorldLDarkGrayReference(Map):
+    """
+    Thunderforest Mobile Atlas Map.
+    If maps won't download get new apikey from:
+    https://www.thunderforest.com/maps/mobile-atlas/
+    """
+
+    @staticmethod
+    def get_urls_gen(tile):
+        yield f'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile' \
+            f'/{tile.zoom}/{tile.google[1]}/{tile.google[0]}'
+
+    tiles_format = ImageFormat.PNG
+    crs = 'EPSG:4326'
 
 # TODO: WRONG YA
 # Yandex uses another cs standard (https://stackoverflow.com/questions/26742738/yandex-tiles-wrong)
