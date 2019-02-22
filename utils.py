@@ -24,6 +24,15 @@ class ImageFormat(Enum):
             raise Exception
         self.suffix = suffix
 
+    @classmethod
+    def get_by(cls, *, suffix, asserting=False):
+        for img_format in cls:
+            if suffix in img_format.possible_suffixes:
+                return img_format
+
+        if asserting:
+            raise Exception('unknown image format')
+
 
 def get_random_tile() -> Tile:
     return Tile.for_latitude_longitude(
