@@ -15,6 +15,8 @@ from shapely.geometry import Polygon
 
 import maps
 from utils import ImageFormat, get_tile_gen, get_filename, get_bbox_in_tms, get_tiles_bbox, get_bbox_in_meters
+import pyproj
+from pyproj import Proj
 
 
 def download_tiles(
@@ -122,20 +124,26 @@ def _merge_tiles_in_gtiff(
     If this parameter is None, `map_.crs` will be used instead.
     :return:
     """
+    source_projection = map_.projection
+    destination_projection = source_projection if crs is None else Proj(crs)
+
     tiles_data = _get_tiles_data(tiles_dir, tms_bbox, zoom, map_.tiles_format)
-    left, bottom, right, top = get_bbox_in_meters(get_tiles_bbox(tms_bbox, zoom))
+    min_lat, min_lon, max_lat, max_lon = get_tiles_bbox(tms_bbox, zoom)
+
+    left, bottom = pyproj.transform(Proj(init='EPSG:4326'), map_.projection, min_lon, min_lat)
+    right, top = pyproj.transform(Proj(init='EPSG:4326'), map_.projection, max_lon, max_lat)
 
     meta = dict(
         driver='GTiff',
-        crs=map_.crs if crs is None else crs,
-        height=tiles_data.shape[0],
-        width=tiles_data.shape[1],
+        crs=destination_projection.srs,
         count=tiles_data.shape[2],
         dtype=tiles_data.dtype
     )
 
     meta['transform'], meta['width'], meta['height'] = rio.warp.calculate_default_transform(
-        map_.crs, meta['crs'], tiles_data.shape[1], tiles_data.shape[0], left, bottom, right, top
+        source_projection.srs, destination_projection.srs,
+        tiles_data.shape[1], tiles_data.shape[0],
+        left, bottom, right, top
     )
 
     src_transform = rio.transform.from_bounds(left, bottom, right, top, tiles_data.shape[1], tiles_data.shape[0])
@@ -145,7 +153,7 @@ def _merge_tiles_in_gtiff(
                 tiles_data.take(i, 2),
                 rio.band(dest_img, i + 1),
                 src_transform=src_transform,
-                src_crs=map_.crs
+                src_crs=source_projection.srs
             )
 
 
@@ -154,7 +162,7 @@ def download_in_gtiff(
         bbox: Tuple[float, float, float, float],
         zoom: int,
         map_: Type[maps.Map],
-        crs: str = 'EPSG:4326',
+        crs: str = '+init=EPSG:4326',
         path_to_tiles: Union[str, Path, None] = None,
         proxies: Optional[dict] = None
 ) -> None:

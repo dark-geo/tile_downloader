@@ -9,6 +9,9 @@ from utils import ImageFormat
 from utils import get_random_tile
 
 
+from pyproj import Proj
+
+
 class Map(ABC):
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
@@ -23,7 +26,7 @@ class Map(ABC):
         return 0
 
     tiles_format = None  # should be overridden
-    crs = None  # should be overridden
+    projection = None   # should be overridden as pyproj.Proj instance or as a proj-string
 
     @classmethod
     def guess_tiles_format(cls) -> Optional[ImageFormat]:
@@ -46,8 +49,10 @@ class Map(ABC):
             else:
                 raise Exception("can't guess tiles format")
 
-        if cls.crs is None:
+        if cls.projection is None:
             raise Exception('unknown coordinate reference system')
+        elif not isinstance(cls.projection, Proj):
+            cls.projection = Proj(cls.projection)
 
         return super().__init_subclass__(**kwargs)
 
@@ -61,7 +66,7 @@ class BingRoad(Map):
                     f'r{tile.quad_tree}.jpeg?mkt=ru-ru&it=G,VE,BX,L,LA&shading=hill&g=94'
             )
 
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class BingSatellite(Map):
@@ -70,7 +75,7 @@ class BingSatellite(Map):
         for i in range(4):
             yield f'http://a{i}.ortho.tiles.virtualearth.net/tiles/a{tile.quad_tree}.jpeg?g=94'
 
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class OpenStreetMap(Map):
@@ -78,7 +83,7 @@ class OpenStreetMap(Map):
     def get_urls_gen(tile):
         yield f'https://c.tile.openstreetmap.org/{tile.zoom}/{tile.google[0]}/{tile.google[1]}.png'
 
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class GoogleHybrid(Map):
@@ -88,7 +93,7 @@ class GoogleHybrid(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=y&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class GoogleRoad(Map):
@@ -98,7 +103,7 @@ class GoogleRoad(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=m&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class GoogleSatellite(Map):
@@ -108,7 +113,7 @@ class GoogleSatellite(Map):
             yield f'http://mt{i}.google.com/vt/lyrs=s&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:3857'
+    projection = Proj(init='EPSG:3857')
 
 
 class ThunderforestLandscape(Map):
@@ -125,7 +130,7 @@ class ThunderforestLandscape(Map):
                 f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    projection = Proj(init='EPSG:4326')
 
 
 class ThunderforestMobileAtlas(Map):
@@ -142,7 +147,7 @@ class ThunderforestMobileAtlas(Map):
                 f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    projection = Proj(init='EPSG:4326')
 
 
 class ArcGISWorldLDarkGrayReference(Map):
@@ -158,7 +163,7 @@ class ArcGISWorldLDarkGrayReference(Map):
             f'/{tile.zoom}/{tile.google[1]}/{tile.google[0]}'
 
     tiles_format = ImageFormat.PNG
-    crs = 'EPSG:4326'
+    projection = Proj(init='EPSG:4326')
 
 # TODO: WRONG YA
 # Yandex uses another cs standard (https://stackoverflow.com/questions/26742738/yandex-tiles-wrong)
