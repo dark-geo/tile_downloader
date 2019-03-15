@@ -1,58 +1,49 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Generator, Optional
-from urllib.parse import urlparse
+from typing import Generator, Optional, Type, Tuple
 
-from pygeotile.tile import Tile
-
-from utils import ImageFormat
-from utils import get_random_tile
-
+from darkgeotile import BaseTile, get_Tile
 
 from pyproj import Proj
 
 
 class Map(ABC):
+    Tile: Type[BaseTile]
+
+    # Attributes for overwriting:
+    projection: Proj
+    projection_bounds: Optional[Tuple[float, float, float, float]] = None
+
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
-    def get_urls_gen(tile: Tile) -> Generator[str, None, None]:
+    def get_urls_gen(tile) -> Generator[str, None, None]:
         raise NotImplementedError
 
     @staticmethod
     def get_timeout():
         return 0
 
-    tiles_format = None  # should be overridden
-    projection = None   # should be overridden as pyproj.Proj instance or as a proj-string
+    @classmethod
+    def get_tile_gen(cls, bbox: Tuple[float, float, float, float], zoom: int) -> Generator[Type[BaseTile], None, None]:  # должен быть определен в maps, чтобы для некот карт можно было имитировать пользовательскую активность
+        tms_x_s, tms_y_s = zip(*[tile.tms for tile in cls.get_corner_tiles(bbox, zoom)])
+
+        for x in range(min(tms_x_s), max(tms_x_s) + 1):
+            for y in range(min(tms_y_s), max(tms_y_s) + 1):
+                yield cls.Tile.from_tms(x, y, zoom)
 
     @classmethod
-    def guess_tiles_format(cls) -> Optional[ImageFormat]:
-        # language=rst
-        """
-        Guessing tiles format of :py:class:`Map` subclass by random tile url
-        (method called if subclass doesn't override `cls.tiles_format` attribute)
-        """
-        for random_tile_url in cls.get_urls_gen(get_random_tile()):
-            suffix = Path(urlparse(random_tile_url)[2]).suffix
-            proper_formats = [img_f for img_f in ImageFormat if suffix in img_f.possible_suffixes]
-            if proper_formats:
-                return proper_formats[0]
+    def get_corner_tiles(cls, bbox, zoom):  # используется несколько раз, в т. ч. в cls.get_tile_gen, поэтому определен тут
+        return tuple(cls.Tile.for_xy(x, y, zoom) for x in bbox[::2] for y in bbox[1::2])
 
     def __init_subclass__(cls, **kwargs):
-        if cls.tiles_format is None:
-            expected_tiles_format = cls.guess_tiles_format()
-            if expected_tiles_format:
-                cls.tiles_format = expected_tiles_format
-            else:
-                raise Exception("can't guess tiles format")
-
         if cls.projection is None:
             raise Exception('unknown coordinate reference system')
         elif not isinstance(cls.projection, Proj):
             cls.projection = Proj(cls.projection)
+
+        cls.Tile = get_Tile(cls.projection, cls.projection_bounds)
 
         return super().__init_subclass__(**kwargs)
 
@@ -92,7 +83,6 @@ class GoogleHybrid(Map):
         for i in range(4):
             yield f'http://mt{i}.google.com/vt/lyrs=y&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:3857')
 
 
@@ -102,7 +92,6 @@ class GoogleRoad(Map):
         for i in range(4):
             yield f'http://mt{i}.google.com/vt/lyrs=m&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:3857')
 
 
@@ -112,8 +101,17 @@ class GoogleSatellite(Map):
         for i in range(4):
             yield f'http://mt{i}.google.com/vt/lyrs=s&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:3857')
+
+
+class YandexRoad(Map):
+    @staticmethod
+    def get_urls_gen(tile):
+        for i in range(1, 5):
+            yield f'http://vec0{i}.maps.yandex.net/tiles?l=map&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
+
+    projection = Proj(init='EPSG:3395')
+    projection_bounds = (-20037508.342789244, -20037508.342789244, 20037508.342789244, 20037508.342789244)
 
 
 class ThunderforestLandscape(Map):
@@ -129,7 +127,6 @@ class ThunderforestLandscape(Map):
             yield f'https://{i}.tile.thunderforest.com/landscape/{tile.zoom}/{tile.google[0]}/{tile.google[1]}' \
                 f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:4326')
 
 
@@ -146,29 +143,16 @@ class ThunderforestMobileAtlas(Map):
             yield f'https://{i}.tile.thunderforest.com/mobile-atlas/{tile.zoom}/{tile.google[0]}/{tile.google[1]}' \
                 f'.png?apikey=7c352c8ff1244dd8b732e349e0b0fe8d'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:4326')
 
 
 class ArcGISWorldLDarkGrayReference(Map):
-    """
-    Thunderforest Mobile Atlas Map.
-    If maps won't download get new apikey from:
-    https://www.thunderforest.com/maps/mobile-atlas/
-    """
-
     @staticmethod
     def get_urls_gen(tile):
         yield f'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile' \
             f'/{tile.zoom}/{tile.google[1]}/{tile.google[0]}'
 
-    tiles_format = ImageFormat.PNG
     projection = Proj(init='EPSG:4326')
 
-# TODO: WRONG YA
-# Yandex uses another cs standard (https://stackoverflow.com/questions/26742738/yandex-tiles-wrong)
-# So yandex tiles usage differs from others
-# template:
-# f'http://vec0{randint(1, 4)}.maps.yandex.net/tiles?l=map&x={tile.google[0]}&y={tile.google[1]}&z={tile.zoom}'
 
 # other maps templates: http://bcdcspatial.blogspot.com/2012/01/onlineoffline-mapping-map-tiles-and.html
