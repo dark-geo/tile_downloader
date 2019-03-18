@@ -2,6 +2,7 @@ import mimetypes
 from enum import Enum
 from pathlib import Path
 from typing import Union, Optional, Type
+
 from darkgeotile import BaseTile
 
 
@@ -32,12 +33,12 @@ class ImageFormat(Enum):
             raise Exception('unknown image format')
 
 
-def get_filename(tile: Type[BaseTile], img_format: ImageFormat, img_dir: Union[str, Path] = '') -> Path:
+def get_expected_path(tile: Type[BaseTile], img_dir: Union[str, Path], img_format: ImageFormat) -> Path:
     # language=rst
     """
     :param tile:
     :param img_format:
     :param img_dir:
-    :return: expected filename for tile if img_dir is '', else -- full path
+    :return: expected path for tile
     """
     return Path(img_dir).joinpath(tile.quad_tree).with_suffix(img_format.suffix)

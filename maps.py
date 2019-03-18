@@ -13,9 +13,6 @@ class Map(ABC):
     projection: Proj
     projection_bounds: Optional[Tuple[float, float, float, float]] = None
 
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError
-
     @staticmethod
     @abstractmethod
     def get_urls_gen(tile) -> Generator[str, None, None]:
@@ -26,7 +23,7 @@ class Map(ABC):
         return 0
 
     @classmethod
-    def get_tile_gen(cls, bbox: Tuple[float, float, float, float], zoom: int) -> Generator[Type[BaseTile], None, None]:  # должен быть определен в maps, чтобы для некот карт можно было имитировать пользовательскую активность
+    def get_tile_gen(cls, bbox: Tuple[float, float, float, float], zoom: int) -> Generator[Type[BaseTile], None, None]:
         tms_x_s, tms_y_s = zip(*[tile.tms for tile in cls.get_corner_tiles(bbox, zoom)])
 
         for x in range(min(tms_x_s), max(tms_x_s) + 1):
@@ -34,7 +31,7 @@ class Map(ABC):
                 yield cls.Tile.from_tms(x, y, zoom)
 
     @classmethod
-    def get_corner_tiles(cls, bbox, zoom):  # используется несколько раз, в т. ч. в cls.get_tile_gen, поэтому определен тут
+    def get_corner_tiles(cls, bbox, zoom):
         return tuple(cls.Tile.for_xy(x, y, zoom) for x in bbox[::2] for y in bbox[1::2])
 
     def __init_subclass__(cls, **kwargs):
