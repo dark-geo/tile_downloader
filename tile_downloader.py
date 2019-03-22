@@ -83,6 +83,7 @@ def download_tiles(
         *,
         proxies: Optional[dict] = None,
         overwriting: bool = False,
+        printing=False,
         **kwargs
 ) -> None:
     # language=rst
@@ -94,6 +95,7 @@ def download_tiles(
     :param proxies: dict with protocol standart names as keys and proxies addresses as values
     :param overwriting: if `True`, will overwrite files with expected tiles names.
     if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info about downloading. Default -- `False`
     :param kwargs:
     ###
     Optional projection keyword
@@ -144,7 +146,8 @@ def download_tiles(
         Path(tiles_dir),
         img_format,
         session,
-        overwriting=overwriting
+        overwriting=overwriting,
+        printing=printing
     )
 
 
@@ -153,6 +156,7 @@ def construct_gtiff(
         path: Union[Path, str],
         tiles_dir: Union[Path, str],
         img_format: Union[ImageFormat, str] = ImageFormat.PNG,
+        printing=False,
         **kwargs
 ) -> None:
     # language=rst
@@ -162,6 +166,7 @@ def construct_gtiff(
     :param path: path for output GeoTIFF
     :param tiles_dir: path to directory that contains necessary tiles
     :param img_format: tiles images format
+    :param printing: if `True`, will print info
     :param kwargs:
     ###
     Optional projection keyword
@@ -198,7 +203,8 @@ def construct_gtiff(
         Path(path),
         Path(tiles_dir),
         img_format,
-        _get_projection(**kwargs)
+        _get_projection(**kwargs),
+        printing=printing
     )
 
 
@@ -210,6 +216,7 @@ def download_in_gtiff(
         *,
         proxies: Optional[dict] = None,
         overwriting: bool = False,
+        printing=False,
         **kwargs
 ) -> None:
     # language=rst
@@ -223,6 +230,7 @@ def download_in_gtiff(
     :param proxies: dict with protocol standart names as keys and proxies addresses as values
     :param overwriting: if `True`, during downloading tiles, it will overwrite files with expected tiles names.
     if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info
     :param kwargs:
     ###
     Optional projection keyword
@@ -267,7 +275,8 @@ def download_in_gtiff(
         img_format,
         session,
         projection=_get_projection(**kwargs),
-        overwriting=overwriting
+        overwriting=overwriting,
+        printing=printing
     )
 
     if temp_dir is not None:

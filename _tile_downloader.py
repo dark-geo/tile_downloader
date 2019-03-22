@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Union, Tuple, Type, Optional
 
 import cv2
+import humanize
 import numpy as np
 import rasterio as rio
 import rasterio.mask
@@ -14,7 +15,7 @@ from pyproj import transform, Proj
 from shapely.geometry import Polygon
 
 import maps
-from utils import ImageFormat, get_expected_path
+from utils import ImageFormat, get_expected_path, TileDownloadingProgressbar
 
 
 def download_tiles(
@@ -26,6 +27,7 @@ def download_tiles(
         session: requests.Session,
         *,
         overwriting=False,
+        printing=False
 ) -> None:
     # language=rst
     """
@@ -39,10 +41,21 @@ def download_tiles(
     :param session: object providing requests session
     :param overwriting: if `True`, will overwrite files with expected tiles names.
     if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info about downloading. Default -- `False`
     :return:
     """
-    for tile in map_.get_tile_gen(bbox, zoom):
+    tile_generator = map_.get_tile_gen(bbox, zoom)
+
+    if printing:
+        tms_x_s, tms_y_s = zip(*[tile.tms for tile in map_.get_corner_tiles(bbox, zoom)])
+        tiles_num = (max(tms_x_s) - min(tms_x_s) + 1) * (max(tms_y_s) - min(tms_y_s) + 1)
+
+        print(f'Downloading {tiles_num} tiles of {map_.__name__}...')
+        tile_generator = progressbar = TileDownloadingProgressbar(tile_generator, total=tiles_num)
+
+    for tile in tile_generator:
         path = get_expected_path(tile, tiles_dir, img_format)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         if not overwriting and path.exists():
             continue
@@ -50,13 +63,22 @@ def download_tiles(
         for url in map_.get_urls_gen(tile):
             response = session.get(url)
             if response.ok:
-                with path.open('wb') as file:
-                    file.write(response.content)
+                if map_.is_ok(response.content):
+                    with path.open('wb') as file:
+                        file.write(response.content)
+
+                if printing:
+                    progressbar.update_avg_bytes_in_img(len(response.content))
 
                 time.sleep(map_.get_timeout())
                 break
-
     session.close()
+
+    if printing:
+        files_paths = (get_expected_path(t, tiles_dir, img_format) for t in map_.get_tile_gen(bbox, zoom))
+        bytes_in_files = sum(fp.stat().st_size for fp in files_paths if fp.exists())
+        print('done.')
+        print(f'Existent tiles from given bbox has total size {humanize.naturalsize(bytes_in_files)}.')
 
 
 def get_tiles_data(
@@ -87,15 +109,19 @@ def get_tiles_data(
             tile = map_.Tile.from_google(google_x, google_y, zoom)
             path = get_expected_path(tile, tiles_dir, img_format)
 
-            if not path.exists():
+            if path.exists():
+                data = cv2.imread(str(path))
+            else:
                 raise Exception(f"Can't reach tile {tile.quad_tree}")
+                # data = np.array([[None, ] * map_.Tile.tile_size, ] * map_.Tile.tile_size)
+                # cv2.hconcat: TypeError: src data type = 17 is not supported
 
-            row.append(cv2.imread(str(path)))
+            row.append(data)
 
         row_img = cv2.hconcat(row)
         rows.append(row_img)
 
-    return cv2.vconcat(rows)
+    return cv2.vconcat(rows)[:, :, ::-1]
 
 
 def merge_in_gtiff(
@@ -157,7 +183,9 @@ def construct_gtiff(
         path: Path,
         tiles_dir: Path,
         img_format: ImageFormat,
-        projection: Optional[Proj] = None
+        projection: Optional[Proj] = None,
+        *,
+        printing=False
 ) -> None:
     # language=rst
     """
@@ -170,8 +198,13 @@ def construct_gtiff(
     :param tiles_dir: path to directory that contains necessary tiles
     :param img_format: tiles images format
     :param projection: projection for output GeoTIFF
+    :param printing: if `True`, will print info. Default -- `False`
     :return:
     """
+
+    if printing:
+        print(f'Constructing GeoTiff to {path} ...')
+
     map_projection_bbox = bbox if projection is None else (
             transform(projection, map_.projection, *bbox[:2]) +
             transform(projection, map_.projection, *bbox[2:])
@@ -193,6 +226,9 @@ def construct_gtiff(
         for i in range(meta['count']):
             file.write(cropped_data[i], i + 1)
 
+    if printing:
+        print(f'done. {humanize.naturalsize(path.stat().st_size)}')
+
 
 def download_in_gtiff(
         map_: Type[maps.Map],
@@ -205,6 +241,7 @@ def download_in_gtiff(
         projection: Optional[Proj] = None,
         *,
         overwriting=False,
+        printing=False
 ) -> None:
     # language=rst
     """
@@ -220,6 +257,7 @@ def download_in_gtiff(
     :param projection: projection for output GeoTIFF
     :param overwriting:  if `True`, will overwrite files with expected tiles names.
     if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info. Default -- `False`
     :return:
     """
     map_bbox = bbox if projection is None else (
@@ -227,5 +265,5 @@ def download_in_gtiff(
         transform(projection, map_.projection, *bbox[2:])
     )
 
-    download_tiles(map_, map_bbox, zoom, tiles_dir, img_format, session, overwriting=overwriting)
-    construct_gtiff(map_, bbox, zoom, path, tiles_dir, img_format, projection)
+    download_tiles(map_, map_bbox, zoom, tiles_dir, img_format, session, overwriting=overwriting, printing=printing)
+    construct_gtiff(map_, bbox, zoom, path, tiles_dir, img_format, projection, printing=printing)

@@ -1,4 +1,8 @@
 # Tile downloader
+
+Small package for downloading maps services tiled image data, 
+and for constructing GeoTIFF files containing these data.
+
  - For common tile downloading use `tile_downloader.download_tiles`
  
  - For constructing GeoTIFF (image with geo-reference) from downloaded tiles 
@@ -9,10 +13,9 @@
    
  - To use custom map service create `maps.Map` and set 
   `maps.Map.get_urls_gen` with url template,
-  `maps.Map.tiles_format` by one of `utils.ImageFormat`
- (works properly for maps with images of spherical projection)
+  `maps.Map.projection` with right map images projection.
  
- For example, if you want your own image of Australia if GeoTIFF, 
+ For example, if you want your own image of Australia in GeoTIFF, 
 run this:
  ```python
 from tile_downloader import download_in_gtiff
@@ -24,7 +27,7 @@ download_in_gtiff(
     max_lat=-10.550982,
     min_lon=111.905820,
     max_lon=155.047867,
-    zoom=7
+    zoom=4
 )
 ```
  

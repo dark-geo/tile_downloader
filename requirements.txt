@@ -4,4 +4,6 @@ requests == 2.21.0
 git+git://github.com/dark-geo/darkGeoTile.git  # darkgeotile
 Shapely == 1.6.4.post2
 pyproj == 1.9.5.1
+tqdm == 4.31.1
 numpy
+humanize
