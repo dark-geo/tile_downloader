@@ -1,165 +1,283 @@
-import tempfile
-import time
+from inspect import isclass
 from pathlib import Path
-from typing import Union, Tuple, Type, Optional
+from tempfile import TemporaryDirectory
+from typing import Union, Type, Optional
 
-import cv2
-import rasterio as rio
-import rasterio.mask
 import requests
-from pygeotile.tile import Tile
-from shapely.geometry import Polygon
+from pyproj import transform, Proj
 
 import maps
-from utils import ImageFormat, get_tile_gen, get_filename, get_bbox_in_tms, get_tiles_bbox
+from _tile_downloader import download_in_gtiff as _download_in_gtiff, download_tiles as _download_tiles, \
+    construct_gtiff as _construct_gtiff
+from utils import ImageFormat
 
-CRS = 'EPSG:4326'
+
+def _get_projection(**kwargs):
+    proj = kwargs.get('projection')
+
+    if 'crs' in kwargs:
+        if proj is not None:
+            raise TypeError
+
+        proj = Proj(kwargs['crs'])
+
+    if 'srs' in kwargs:
+        if proj is not None:
+            raise TypeError
+
+        proj = Proj(kwargs['srs'])
+
+    return Proj(init='EPSG:4326') if proj is None else proj
+
+
+def _get_area_args_as_bbox(**kwargs):
+    bbox = kwargs.get('bbox')
+
+    if {'min_x', 'min_y', 'max_x', 'max_y'} & kwargs.keys():
+        if bbox is not None:
+            raise TypeError
+
+        bbox = kwargs['min_x'], kwargs['min_y'], kwargs['max_x'], kwargs['max_y']
+
+    if {'left', 'right', 'bottom', 'top'} & kwargs.keys():
+        if bbox is not None:
+            raise TypeError
+
+        bbox = kwargs['left'], kwargs['bottom'], kwargs['right'], kwargs['top']
+
+    if {'min_lat', 'min_lon', 'max_lat', 'max_lon'} & kwargs.keys():
+        if bbox is not None:
+            raise TypeError
+
+        proj = _get_projection(**kwargs)
+        bbox = (
+            transform(Proj(proj='latlong'), proj, kwargs['min_lon'], kwargs['min_lat']) +
+            transform(Proj(proj='latlong'), proj, kwargs['max_lon'], kwargs['max_lat'])
+        )
+
+    if bbox is None:
+        raise TypeError
+
+    return bbox
+
+
+def _get_zoom(**kwargs):
+    zoom = kwargs.get('zoom')
+
+    if 'zoomlevel' in kwargs:
+        if zoom is not None:
+            raise TypeError
+
+        zoom = kwargs['zoomlevel']
+
+    if zoom is None:
+        raise TypeError
+
+    return zoom
 
 
 def download_tiles(
+        map_: Union[Type[maps.Map], str],
         tiles_dir: Union[Path, str],
-        bbox: Tuple[float, float, float, float],
-        zoom: int,
-        map_: Type[maps.Map],
-        proxies: Optional[dict] = None
+        img_format: Union[ImageFormat, str] = ImageFormat.PNG,
+        *,
+        proxies: Optional[dict] = None,
+        overwriting: bool = False,
+        printing=False,
+        **kwargs
 ) -> None:
     # language=rst
     """
-    Download tiles from `bbox` with `zoom` zoomlevel to `tiles_dir` from `map_` using `proxies`.
-    :param tiles_dir:
-    :param bbox: area of the geo coordinates in the form of:
-     `(min_lat, min_lon, max_lat, max_lon)`
-    :param zoom:
-    :param map_:
-    :param proxies:
+    Download `map_` tiles from given area with certain zoom-level to `tiles_dir` from `map_`.
+    :param map_: maps.Map subclass, which tiles will be downloaded, or name of that subclass from maps.py
+    :param tiles_dir: path to directory for downloading
+    :param img_format: tiles images format
+    :param proxies: dict with protocol standart names as keys and proxies addresses as values
+    :param overwriting: if `True`, will overwrite files with expected tiles names.
+    if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info about downloading. Default -- `False`
+    :param kwargs:
+    ###
+    Optional projection keyword
+    ###
+    As one of the next keywords:
+    * `projection` -- py:class:`pyproj.Proj` projection object
+    * `crs` of `srs` -- coordinate reference system as PROJ.4 string
+    If projection wasn't defined, then will used WGS 84 latitude longitude reference system
+
+    ###
+    Area keywords
+    ###
+    Area bounds should given for given projection in one of the following form:
+    * `bbox` of area coordinates in from `(min_x, min_y, max_x, max_y)`
+    * `min_x`, `min_y`, `max_x`, `max_y`
+    * `left`, `bottom`, `right`, `top`
+    * `min_lon`, `min_lat`, `max_lon`, `max_lat` for latitudes and
+    longitudes even for non-geographic coordinate systems.
+
+    ###
+    Zoom-level keyword
+    ###
+    Should given as `zoom` or `zoomlevel` keyword
+
     :return:
+
     """
+    map_ = map_ if isclass(map_) and issubclass(map_, maps.Map) else getattr(maps, map_)
+    projection = _get_projection(**kwargs)
+
+    bbox_in_source_projection = _get_area_args_as_bbox(**kwargs)
+    bbox_in_map_projection = (
+        transform(projection, map_.projection, *bbox_in_source_projection[:2]) +
+        transform(projection, map_.projection, *bbox_in_source_projection[2:])
+    )
+
+    if not isinstance(img_format, ImageFormat):
+        img_format = ImageFormat.get_by(suffix=img_format, asserting=True)
+
     session = requests.session()
     if proxies is not None:
         session.proxies = proxies
 
-    for tile in get_tile_gen(bbox, zoom):
-        path = get_filename(tile, map_.tiles_format, tiles_dir)
-
-        if not path.exists():
-            for url in map_.get_urls_gen(tile):
-                response = session.get(url)
-                time.sleep(map_.get_timeout())
-                if response.ok:
-                    with open(path, 'wb') as file:
-                        file.write(response.content)
-                    break
-
-    session.close()
-
-
-def _merge_tiles(
-        path: Union[Path, str],
-        tiles_dir: Union[Path, str],
-        tms_bbox: Tuple[int, int, int, int],
-        zoom: int,
-        tiles_format: ImageFormat
-) -> None:
-    # language=rst
-    """
-    Merge tiles from `tms_bbox` area from `tiles_dir` with `zoom` zoomlevel and `tiles_format` image format
-    in image file with `path` without georeference
-    :param path:
-    :param tiles_dir:
-    :param tms_bbox: area of the tms coordinates in the form of:
-     `(min_x, min_y, max_x, max_y)`
-    :param zoom:
-    :param tiles_format:
-    :return:
-    """
-    min_x, min_y, max_x, max_y = tms_bbox
-
-    rows = list()
-    for y in range(max_y, min_y - 1, -1):
-        row = list()
-        for x in range(min_x, max_x + 1):
-            tile_path = get_filename(Tile.from_tms(x, y, zoom), tiles_format, tiles_dir)
-            row.append(cv2.imread(str(tile_path)))
-
-        row_img = cv2.hconcat(row)
-        rows.append(row_img)
-    data = cv2.vconcat(rows)
-
-    cv2.imwrite(path, data)
-
-
-def _megre_tiles_in_gtiff(
-        path: Union[Path, str],
-        tiles_dir: Union[Path, str],
-        tms_bbox: Tuple[int, int, int, int],
-        zoom: int,
-        tiles_format: ImageFormat
-) -> None:
-    # language=rst
-    """
-    Merge tiles from `tms_bbox` area from `tiles_dir` with `zoom` zoomlevel and `tiles_format` image format
-    in GeoTiff file with `path`
-    :param path:
-    :param tiles_dir:
-    :param tms_bbox: area of the tms coordinates in the form of:
-     `(min_x, min_y, max_x, max_y)`
-    :param zoom:
-    :param tiles_format:
-    :return:
-    """
-    with tempfile.NamedTemporaryFile(suffix='.tiff') as tmfile:
-        _merge_tiles(tmfile.name, tiles_dir, tms_bbox, zoom, tiles_format)
-
-        with rio.open(tmfile.name) as tiff_img:
-            meta = tiff_img.meta.copy()
-            data = tiff_img.read()
-
-    meta['driver'] = 'GTiff'
-    meta['crs'] = CRS
-
-    tiles_bbox = get_tiles_bbox(tms_bbox=tms_bbox, zoom=zoom)
-    meta['transform'] = rio.transform.from_bounds(
-        tiles_bbox[1], tiles_bbox[0], tiles_bbox[3], tiles_bbox[2], tiff_img.width, tiff_img.height
+    _download_tiles(
+        map_,
+        bbox_in_map_projection,
+        _get_zoom(**kwargs),
+        Path(tiles_dir),
+        img_format,
+        session,
+        overwriting=overwriting,
+        printing=printing
     )
 
-    with rio.open(path, 'w', **meta) as file:
-        for i in range(meta['count']):
-            file.write(data[i], i + 1)
+
+def construct_gtiff(
+        map_: Union[Type[maps.Map], str],
+        path: Union[Path, str],
+        tiles_dir: Union[Path, str],
+        img_format: Union[ImageFormat, str] = ImageFormat.PNG,
+        printing=False,
+        **kwargs
+) -> None:
+    # language=rst
+    """
+    Construct GeoTIFF file for area if given projection for `map_` tiles from `tiles_dir` with specified zoom-level
+    :param map_: maps.Map subclass, which tiles will be used, or name of that subclass from maps.py
+    :param path: path for output GeoTIFF
+    :param tiles_dir: path to directory that contains necessary tiles
+    :param img_format: tiles images format
+    :param printing: if `True`, will print info
+    :param kwargs:
+    ###
+    Optional projection keyword
+    ###
+    As one of the next keywords:
+    * `projection` -- py:class:`pyproj.Proj` projection object
+    * `crs` of `srs` -- coordinate reference system as PROJ.4 string
+    If projection wasn't defined, then will used WGS 84 latitude longitude reference system
+
+    ###
+    Area keywords
+    ###
+    Area bounds should given for given projection in one of the following form:
+    * `bbox` of area coordinates in from `(min_x, min_y, max_x, max_y)`
+    * `min_x`, `min_y`, `max_x`, `max_y`
+    * `left`, `bottom`, `right`, `top`
+    * `min_lon`, `min_lat`, `max_lon`, `max_lat` for latitudes and
+    longitudes even for non-geographic coordinate systems.
+
+    ###
+    Zoom-level keyword
+    ###
+    Should given as `zoom` or `zoomlevel` keyword
+
+    :return:
+    """
+    if not isinstance(img_format, ImageFormat):
+        img_format = ImageFormat.get_by(suffix=img_format, asserting=True)
+
+    _construct_gtiff(
+        map_ if isclass(map_) and issubclass(map_, maps.Map) else getattr(maps, map_),
+        _get_area_args_as_bbox(**kwargs),
+        _get_zoom(**kwargs),
+        Path(path),
+        Path(tiles_dir),
+        img_format,
+        _get_projection(**kwargs),
+        printing=printing
+    )
 
 
 def download_in_gtiff(
+        map_: Union[Type[maps.Map], str],
         path: Union[Path, str],
-        bbox: Tuple[float, float, float, float],
-        zoom: int,
-        map_: Type[maps.Map]
+        tiles_dir: Union[str, Path, None] = None,
+        img_format: ImageFormat = ImageFormat.PNG,
+        *,
+        proxies: Optional[dict] = None,
+        overwriting: bool = False,
+        printing=False,
+        **kwargs
 ) -> None:
     # language=rst
     """
-    Download tiles data in GeoTiff file to `path`
-    from `bbox` area with zoomlevel `zoom` using `map_`
-    :param path:
-    :param bbox: area of the tms coordinates in the form of:
-     `(min_x, min_y, max_x, max_y)`
-    :param zoom:
-    :param map_:
+    Download `map_` image data of area if given projection for specified zoom-level as a GeoTIFF file.
+    :param map_: maps.Map subclass, which tiles will be downloaded, or name of that subclass from maps.py
+    :param path: path for output GeoTIFF
+    :param tiles_dir: optional path to for tiles directory. If `None`, then tiles will be downloaded
+    in temporary directory, and will be deleted after creation of a GeoTIFF file.
+    :param img_format: tiles images format
+    :param proxies: dict with protocol standart names as keys and proxies addresses as values
+    :param overwriting: if `True`, during downloading tiles, it will overwrite files with expected tiles names.
+    if `False`, will skip existent files with expected tiles names.
+    :param printing: if `True`, will print info
+    :param kwargs:
+    ###
+    Optional projection keyword
+    ###
+    As one of the next keywords:
+    * `projection` -- py:class:`pyproj.Proj` projection object
+    * `crs` of `srs` -- coordinate reference system as PROJ.4 string
+    If projection wasn't defined, then will used WGS 84 latitude longitude reference system
+
+    ###
+    Area keywords
+    ###
+    Area bounds should given for given projection in one of the following form:
+    * `bbox` of area coordinates in from `(min_x, min_y, max_x, max_y)`
+    * `min_x`, `min_y`, `max_x`, `max_y`
+    * `left`, `bottom`, `right`, `top`
+    * `min_lon`, `min_lat`, `max_lon`, `max_lat` for latitudes and
+    longitudes even for non-geographic coordinate systems.
+
+    ###
+    Zoom-level keyword
+    ###
+    Should given as `zoom` or `zoomlevel` keyword
+
     :return:
     """
-    with tempfile.NamedTemporaryFile() as tmfile:
-        with tempfile.TemporaryDirectory() as t_dir:
-            download_tiles(t_dir, bbox, zoom, map_)
-            tms_bbox = get_bbox_in_tms(bbox, zoom)
-            _megre_tiles_in_gtiff(tmfile.name, t_dir, tms_bbox, zoom, map_.tiles_format)
+    if not isinstance(img_format, ImageFormat):
+        img_format = ImageFormat.get_by(suffix=img_format, asserting=True)
 
-        img = rio.open(tmfile.name)
-        meta = img.meta.copy()
+    session = requests.session()
+    if proxies is not None:
+        session.proxies = proxies
 
-        cropped_data, meta['transform'] = rio.mask.mask(
-            img,
-            [Polygon.from_bounds(*bbox[1::-1], *bbox[:1:-1]), ],
-            crop=True
-        )
+    temp_dir = TemporaryDirectory() if tiles_dir is None else None
 
-        meta['width'], meta['height'] = cropped_data.shape[:-3:-1]
-    with rio.open(path, 'w', **meta) as file:
-        for i in range(meta['count']):
-            file.write(cropped_data[i], i + 1)
+    _download_in_gtiff(
+        map_ if isclass(map_) and issubclass(map_, maps.Map) else getattr(maps, map_),
+        _get_area_args_as_bbox(**kwargs),
+        _get_zoom(**kwargs),
+        Path(path),
+        Path(temp_dir.name if tiles_dir is None else tiles_dir),
+        img_format,
+        session,
+        projection=_get_projection(**kwargs),
+        overwriting=overwriting,
+        printing=printing
+    )
+
+    if temp_dir is not None:
+        temp_dir.cleanup()

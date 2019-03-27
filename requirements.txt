@@ -1,5 +1,9 @@
 opencv-python == 4.0.0.21
 rasterio == 1.0.18
 requests == 2.21.0
-pyGeoTile == 1.0.6
+git+git://github.com/dark-geo/darkGeoTile.git  # darkgeotile
 Shapely == 1.6.4.post2
+pyproj == 1.9.5.1
+tqdm == 4.31.1
+numpy
+humanize
